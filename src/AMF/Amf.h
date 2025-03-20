@@ -17,6 +17,8 @@
 #define __SIMU5GC_AMF_H_
 
 #include <omnetpp.h>
+
+#include "../_contexts/UeContext.h"
 #include "AmfMessages.h"
 
 using namespace omnetpp;
@@ -26,6 +28,9 @@ using namespace omnetpp;
  */
 class Amf : public cSimpleModule
 {
+  private:
+    UeContextTable ueTable;  // Store UE state information
+
   protected:
     virtual void initialize() override;
     virtual void handleMessage(cMessage *msg) override;

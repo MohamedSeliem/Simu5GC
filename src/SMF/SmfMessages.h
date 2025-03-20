@@ -96,5 +96,50 @@ class BindingResponse : public cMessage {
     }
 };
 
+/// Message for modifying an active PDU session (e.g., QoS updates)
+class PduSessionModify : public cMessage {
+  public:
+    int ueId;
+    int sessionId;
+
+    PduSessionModify(int id, int sessId) : cMessage("PDU_SESSION_MODIFY") {
+        ueId = id;
+        sessionId = sessId;
+    }
+};
+
+/// Message for notifying AMF about session modifications
+class PduSessionModifyResponse : public cMessage {
+  public:
+    int ueId;
+    int sessionId;
+
+    PduSessionModifyResponse(int id, int sessId) : cMessage("PDU_SESSION_MODIFY_RESPONSE") {
+        ueId = id;
+        sessionId = sessId;
+    }
+};
+
+/// Message for UE deregistration and session release
+class UeDeregister : public cMessage {
+  public:
+    int ueId;
+
+    UeDeregister(int id) : cMessage("UE_DEREGISTER") {
+        ueId = id;
+    }
+};
+
+/// Message for notifying AMF about released sessions
+class ReleaseSession : public cMessage {
+  public:
+    int ueId;
+
+    ReleaseSession(int id) : cMessage("RELEASE_SESSION") {
+        ueId = id;
+    }
+};
+
+
 #endif /* SMF_MESSAGES_H_ */
 

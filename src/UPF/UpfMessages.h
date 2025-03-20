@@ -35,6 +35,19 @@ class UpfSessionResponse : public cMessage {
     }
 };
 
+
+/// Message for releasing a UPF session (session teardown)
+class UpfSessionRelease : public cMessage {
+  public:
+    int ueId;
+    int sessionId;
+
+    UpfSessionRelease(int id, int sessId) : cMessage("UPF_SESSION_RELEASE") {
+        ueId = id;
+        sessionId = sessId;
+    }
+};
+
 class DataPacket : public cMessage {
   public:
     int ueId;

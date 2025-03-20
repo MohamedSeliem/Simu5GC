@@ -17,6 +17,9 @@
 #define __SIMU5GC_UPF_H_
 
 #include <omnetpp.h>
+#include "_contexts/UpfSessionTable.h"  // Include session tracking
+#include "UpfMessages.h"
+#include <unordered_map>
 
 using namespace omnetpp;
 
@@ -25,6 +28,8 @@ using namespace omnetpp;
  */
 class Upf : public cSimpleModule
 {
+  private:
+    UpfSessionTable sessionTable;  // Tracks active session flows
   protected:
     virtual void initialize() override;
     virtual void handleMessage(cMessage *msg) override;

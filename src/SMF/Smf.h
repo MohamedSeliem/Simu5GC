@@ -17,6 +17,7 @@
 #define __SIMU5GC_SMF_H_
 
 #include <omnetpp.h>
+#include "../_contexts/SmfContext.h"
 
 using namespace omnetpp;
 
@@ -25,6 +26,9 @@ using namespace omnetpp;
  */
 class Smf : public cSimpleModule
 {
+  private:
+    SmfContextTable sessionTable;  // UE Session State Table
+
   protected:
     virtual void initialize() override;
     virtual void handleMessage(cMessage *msg) override;
