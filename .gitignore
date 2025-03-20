@@ -1,0 +1,19 @@
+# OMNeT++ build files
+out/
+*.o
+*.so
+*.dll
+*.exe
+*.dep
+*.bak
+*.log
+*.vec
+*.sca
+*.vci
+*.vci_backup
+# Eclipse/VSCode project files
+.settings/
+.project
+.cproject
+.idea/
+.vscode/
