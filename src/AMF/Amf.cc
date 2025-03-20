@@ -27,50 +27,78 @@ void Amf::handleMessage(cMessage *msg) {
        << msg->getSenderModule()->getName() << "\n";
 
     if (strcmp(msg->getName(), "UE_REGISTER") == 0) {  // N1 (UE Registration)
-        // Extract UE ID and requested slice type
         UeRegister *reg = check_and_cast<UeRegister *>(msg);
         int ueId = reg->ueId;
         std::string sliceType = reg->requestedSlice;
 
         EV << "Processing UE Registration: UE ID = " << ueId
-                   << ", Requested Slice = " << sliceType << "\n";
+           << ", Requested Slice = " << sliceType << "\n";
 
-        // Request slice selection from NSSF via N17
-        SliceSelectionRequest *sliceRequest = new SliceSelectionRequest(ueId, sliceType);
-        send(sliceRequest, "N17Out");
+        // If UE is deregistered, reset it to UNREGISTERED before registration
+        if (ueTable.getUeState(ueId) == DEREGISTERED) {
+            EV << "UE ID " << ueId << " was previously deregistered. Resetting to UNREGISTERED before re-registration.\n";
+            ueTable.updateUeState(ueId, UNREGISTERED);
+        }
+
+        // Proceed with registration for new or reset UEs
+        if (ueTable.getUeState(ueId) == UNREGISTERED) {
+            EV << "Processing UE Registration: UE ID = " << ueId
+               << ", Requested Slice = " << sliceType << "\n";
+            ueTable.addUe(ueId, REGISTERED, sliceType, ueId * 10); // Assign session ID dynamically
+
+            // Request slice selection from NSSF via N17
+            SliceSelectionRequest *sliceRequest = new SliceSelectionRequest(ueId, sliceType);
+            send(sliceRequest, "N17Out");
+        } else {
+            EV << "Warning: UE ID " << ueId << " is already registered. Ignoring duplicate registration request.\n";
+        }
     }
     else if (strcmp(msg->getName(), "SLICE_SELECTION_RESPONSE") == 0) {  // N17 (Slice Selection)
         SliceSelectionResponse *resp = check_and_cast<SliceSelectionResponse *>(msg);
+        int ueId = resp->ueId;
 
-        EV << "Received slice selection for UE ID " << resp->ueId << ". Proceeding with authentication...\n";
+        EV << "Received slice selection for UE ID " << ueId << ". Proceeding with authentication...\n";
+
         // Send authentication request to AUSF via N8
-        AuthRequest *authReq = new AuthRequest(resp->ueId);
+        AuthRequest *authReq = new AuthRequest(ueId);
         send(authReq, "N8Out");
     }
     else if (strcmp(msg->getName(), "AUTH_RESPONSE") == 0) {  // N8 (Authentication)
         AuthResponse *auth = check_and_cast<AuthResponse *>(msg);
+        int ueId = auth->ueId;
+
         if (auth->isAuthenticated) {
-            EV << "UE ID " << auth->ueId << " authenticated. Initiating PDU session setup...\n";
+            EV << "UE ID " << ueId << " authenticated. Transitioning to CONNECTED state.\n";
+            ueTable.updateUeState(ueId, CONNECTED);
 
             // Send binding request to BSF via N21
-            BindingRequest *bindingRequest = new BindingRequest(auth->ueId);
+            BindingRequest *bindingRequest = new BindingRequest(ueId);
             send(bindingRequest, "N21Out");
         } else {
-            EV << "UE ID " << auth->ueId << " authentication failed.\n";
-            //todo: create message for failed authentication.
+            EV << "UE ID " << ueId << " authentication failed. Transitioning to DEREGISTERED.\n";
+            ueTable.updateUeState(ueId, DEREGISTERED);
         }
     }
     else if (strcmp(msg->getName(), "BINDING_RESPONSE") == 0) {  // N21 (Binding Support)
         BindingResponse *binding = check_and_cast<BindingResponse *>(msg);
-        EV << "Binding successful for UE ID: " << binding->ueId << ". Sending PDU session request to SMF...\n";
+        int ueId = binding->ueId;
 
-        // Send PDU session setup request to SMF via N11
-        PduSessionRequest *sessionReq = new PduSessionRequest(binding->ueId, 1);
-        send(sessionReq, "N11Out");
+        EV << "Binding successful for UE ID: " << ueId << ". Sending PDU session request to SMF...\n";
+
+        // Ensure UE is in the correct state before proceeding
+        if (ueTable.getUeState(ueId) == CONNECTED) {
+            PduSessionRequest *sessionReq = new PduSessionRequest(ueId, ueId * 10);
+            send(sessionReq, "N11Out");
+        } else {
+            EV << "Error: UE ID " << ueId << " is not in the CONNECTED state. Cannot proceed with PDU session setup.\n";
+        }
     }
     else if (strcmp(msg->getName(), "PDU_SESSION_ACCEPT") == 0) {  // N11 (PDU session established)
         PduSessionAccept *session = check_and_cast<PduSessionAccept *>(msg);
-        EV << "PDU Session established for UE ID " << session->ueId << " Session ID: " << session->sessionId << "\n";
+        int ueId = session->ueId;
+
+        EV << "PDU Session established for UE ID " << ueId << " Session ID: " << session->sessionId << "\n";
+        ueTable.updateUeState(ueId, CONNECTED);
 
         // Send UE registration complete message
         cMessage *regComplete = new cMessage("UE_REGISTRATION_COMPLETE");
@@ -78,40 +106,62 @@ void Amf::handleMessage(cMessage *msg) {
     }
     else if (strcmp(msg->getName(), "HANDOVER_REQUEST") == 0) {  // N2/N12 (Handover Request from gNB)
         HandoverRequest *handover = check_and_cast<HandoverRequest *>(msg);
-        EV << "Handling mobility event (handover) for UE ID " << handover->ueId
-           << " to target gNB ID " << handover->targetGnbId << "\n";
+        int ueId = handover->ueId;
 
-        // Inform target gNB about incoming UE handover
-        HandoverConfirm *handoverConfirm = new HandoverConfirm(handover->ueId);
-        send(handoverConfirm, "N12Out");
+        if (ueTable.getUeState(ueId) == CONNECTED) {
+            EV << "Handling mobility event (handover) for UE ID " << ueId
+               << " to target gNB ID " << handover->targetGnbId << "\n";
+
+            // Transition UE state to HANDOVER
+            ueTable.updateUeState(ueId, HANDOVER);
+
+            // Inform target gNB about incoming UE handover
+            HandoverConfirm *handoverConfirm = new HandoverConfirm(ueId);
+            send(handoverConfirm, "N12Out");
+        } else {
+            EV << "Error: UE ID " << ueId << " is not in CONNECTED state. Cannot process handover.\n";
+        }
     }
     else if (strcmp(msg->getName(), "AMF_TRANSFER") == 0) {  // N14 (Inter-AMF Handover)
         AmfTransfer *amfTransfer = check_and_cast<AmfTransfer *>(msg);
-        EV << "Handling inter-AMF handover for UE ID " << amfTransfer->ueId
+        int ueId = amfTransfer->ueId;
+
+        EV << "Handling inter-AMF handover for UE ID " << ueId
            << " to target AMF ID " << amfTransfer->targetAmfId << "\n";
 
+        // Transition UE state to HANDOVER
+        ueTable.updateUeState(ueId, HANDOVER);
+
         // Transfer UE context to another AMF
-        AmfTransferComplete *handoverComplete = new AmfTransferComplete(amfTransfer->ueId);
+        AmfTransferComplete *handoverComplete = new AmfTransferComplete(ueId);
         send(handoverComplete, "N14Out");
     }
     else if (strcmp(msg->getName(), "PAGING_REQUEST") == 0) {  // N2 (Paging from gNB)
         PagingRequest *paging = check_and_cast<PagingRequest *>(msg);
-        EV << "Received paging request for UE ID: " << paging->ueId << ". Notifying UE...\n";
+        int ueId = paging->ueId;
+
+        EV << "Received paging request for UE ID: " << ueId << ". Notifying UE...\n";
 
         // Forward paging message to UE
-        PagingNotification *pagingNotify = new PagingNotification(paging->ueId);
+        PagingNotification *pagingNotify = new PagingNotification(ueId);
         send(pagingNotify, "N1Out");
     }
     else if (strcmp(msg->getName(), "UE_DEREGISTER") == 0) {  // UE Deregistration
         UeDeregister *dereg = check_and_cast<UeDeregister *>(msg);
-        EV << "UE ID " << dereg->ueId << " is de-registering. Releasing resources...\n";
+        int ueId = dereg->ueId;
+
+        EV << "UE ID " << ueId << " is de-registering. Releasing resources...\n";
+
+        // Update UE state and remove from context
+        ueTable.updateUeState(ueId, DEREGISTERED);
+        ueTable.removeUe(ueId);
 
         // Notify SMF to remove session
-        ReleaseSession *releaseSession = new ReleaseSession(dereg->ueId);
+        ReleaseSession *releaseSession = new ReleaseSession(ueId);
         send(releaseSession, "N11Out");
 
         // Notify network functions
-        UeContextRelease *notifyRelease = new UeContextRelease(dereg->ueId);
+        UeContextRelease *notifyRelease = new UeContextRelease(ueId);
         send(notifyRelease, "N2Out");
     }
     else {

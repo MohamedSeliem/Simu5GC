@@ -14,8 +14,6 @@
 // 
 
 #include "Upf.h"
-#include "UpfMessages.h"
-#include <unordered_map>
 
 Define_Module(Upf);
 
@@ -32,12 +30,40 @@ void Upf::handleMessage(cMessage *msg) {
 
     if (strcmp(msg->getName(), "UPF_SESSION_SETUP") == 0) {  // N4 (SMF → UPF)
         UpfSessionSetup *req = check_and_cast<UpfSessionSetup *>(msg);
-        EV << "Setting up session for UE ID: " << req->ueId << ", Session ID: " << req->sessionId << "\n";
+        int ueId = req->ueId;
+        int sessionId = req->sessionId;
+        std::string destination = req->destination;
 
-        sessionTable[req->ueId] = req->sessionId;
+        EV << "Setting up session for UE ID: " << ueId << ", Session ID: " << sessionId << "\n";
+
+        // Check if the session already exists
+        if (sessionTable.hasSession(ueId, sessionId)) {
+            EV << "Warning: UPF session for UE " << ueId << ", Session ID " << sessionId << " already exists.\n";
+            delete msg;
+            return;
+        }
+
+        // Create a new forwarding session
+        sessionTable.addSession(ueId, sessionId, destination);
+
+        EV << "UPF session established for UE " << ueId << ", Session ID: " << sessionId << "\n";
 
         UpfSessionResponse *resp = new UpfSessionResponse(req->ueId, req->sessionId, true);
         send(resp, "N4Out");  // Send to SMF via N4
+    }
+    else if (strcmp(msg->getName(), "UPF_SESSION_RELEASE") == 0) {  // Release session
+        UpfSessionRelease *release = check_and_cast<UpfSessionRelease *>(msg);
+        int ueId = release->ueId;
+        int sessionId = release->sessionId;
+
+        EV << "Releasing UPF session for UE " << ueId << ", Session ID: " << sessionId << "\n";
+
+        // Remove session from table
+        if (sessionTable.removeSession(ueId, sessionId)) {
+            EV << "Session successfully removed from UPF.\n";
+        } else {
+            EV << "Error: Session not found in UPF.\n";
+        }
     }
     else if (strcmp(msg->getName(), "DATA_PACKET") == 0) {  // N3 (gNB → UPF)
         DataPacket *packet = check_and_cast<DataPacket *>(msg);
